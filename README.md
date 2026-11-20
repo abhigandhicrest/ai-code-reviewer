@@ -38,12 +38,14 @@ Set GitHub secrets `REVIEWER_URL` (e.g. `https://host/api/v1/review`) and `REVIE
 
 Terminal client for the same review/generate pipeline (`api/scripts/ai_review.py`, exposed as the `ai-buddy` command on PATH). Runs go through the Laravel API, so history/quota/audit still apply. Token is read from `AI_REVIEW_TOKEN` or `~/.ai-review-token`.
 
-**One-time setup:**
+**Install (one-time):**
 
 ```powershell
-php artisan reviewer:token admin@local.test --name=cli --show
-# save the printed token to %USERPROFILE%\.ai-review-token  (or set $env:AI_REVIEW_TOKEN)
+scripts\install-ai-buddy.bat   # copies ai-buddy to your PATH, prompts for token, verifies
+php artisan reviewer:token admin@local.test --name=cli --show   # if you need a token
 ```
+
+The installer copies `scripts/ai-buddy.cmd` into a PATH directory (e.g. `%LOCALAPPDATA%\Python\bin`), saves the token to `%USERPROFILE%\.ai-review-token`, and runs a smoke check. The command resolves the script via `AI_REVIEWER_HOME` → repo-relative → `D:\laragon\www\ai-code-reviewer` default.
 
 **Review commands:**
 
