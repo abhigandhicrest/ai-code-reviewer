@@ -1,0 +1,70 @@
+# Example CI review against a reachable Laravel instance.
+# Copy to ai-code-review.yml and set secrets:
+#   REVIEWER_URL   e.g. https://your-host/api/v1/review
+#   REVIEWER_TOKEN Sanctum token from: php artisan reviewer:token admin@local.test --show
+name: AI Code Review (example)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build PR diff
+        id: diff
+        shell: bash
+        run: |
+          git fetch origin "${{ github.base_ref }}" --depth=1 || true
+          BASE="origin/${{ github.base_ref }}"
+          git diff --unified=3 "$BASE"...HEAD > /tmp/pr.diff
+          BYTES=$(wc -c < /tmp/pr.diff | tr -d ' ')
+          echo "bytes=$BYTES" >> "$GITHUB_OUTPUT"
+          if [ "$BYTES" -eq 0 ]; then
+            echo "empty=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "empty=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip empty diff
+        if: steps.diff.outputs.empty == '1'
+        run: echo "No changes to review."
+
+      - name: Call reviewer API
+        if: steps.diff.outputs.empty != '1'
+        env:
+          REVIEWER_URL: ${{ secrets.REVIEWER_URL }}
+          REVIEWER_TOKEN: ${{ secrets.REVIEWER_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${REVIEWER_URL:-}" ] || [ -z "${REVIEWER_TOKEN:-}" ]; then
+            echo "Missing REVIEWER_URL or REVIEWER_TOKEN secrets."
+            exit 1
+          fi
+          # JSON-escape the diff
+          DIFF_JSON=$(python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' < /tmp/pr.diff)
+          BODY=$(printf '{"diff_text":%s,"generate_code":false,"fail_on":["high"]}' "$DIFF_JSON")
+          HTTP=$(curl -sS -o /tmp/review.json -w "%{http_code}" \
+            -X POST "$REVIEWER_URL" \
+            -H "Authorization: Bearer $REVIEWER_TOKEN" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            --data-binary "$BODY")
+          echo "HTTP $HTTP"
+          cat /tmp/review.json
+          echo
+          FAILED=$(python3 -c 'import json; print(json.load(open("/tmp/review.json")).get("failed", False))')
+          if [ "$HTTP" = "422" ] || [ "$FAILED" = "True" ]; then
+            echo "Review failed on high-severity findings."
+            exit 1
+          fi
+          if [ "$HTTP" != "200" ]; then
+            echo "Reviewer API error."
+            exit 1
+          fi
